@@ -1,1 +1,1 @@
-# Smart-Air-Heater
+# Smart-Air-Heater-ESPHome

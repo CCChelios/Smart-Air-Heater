@@ -1,0 +1,356 @@
+esphome:
+  name: heater
+  platform: ESP8266
+  board: nodemcuv2
+  on_boot:
+    priority: -100
+    then:
+      - climate.control:
+          id: thermostat_on_heater_1
+          mode: HEAT
+          target_temperature: 85°C
+      - climate.control:
+          id: thermostat_on_heater_2
+          mode: HEAT
+          target_temperature: 85°C
+      - climate.control:
+          id: thermostat_on_heater_3
+          mode: HEAT
+          target_temperature: 85°C
+logger:
+  level: INFO
+  
+api:
+
+ota:
+  password: "d9976562da8d6eaa240723806b855a08"
+
+wifi:
+  ssid: "SSID"
+  password: "pass"
+  manual_ip:
+    static_ip: 192.168.2.216
+    gateway: 192.168.2.1
+    subnet: 255.255.255.0
+    
+  ap:
+    ssid: "Heater Fallback Hotspot"
+    password: "leQrVo35AnyN"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+number:
+  # KP
+  - platform: template
+    name: kp
+    icon: mdi:chart-bell-curve
+    restore_value: true
+    min_value: 0
+    max_value: 10
+    step: 0.001
+    set_action: 
+      lambda: |- 
+        // ESP_LOGI("main", "!!!!!! kp from boot %d", id("console_fan_kp") );
+        // id(console_thermostat).set_kp( id("$friendly_name kp") );
+        id(pid_air_thermostat).set_kp( x );
+  # KI
+  - platform: template
+    name: ki
+    icon: mdi:chart-bell-curve
+    restore_value: true
+    min_value: 0
+    max_value: 10
+    step: 0.00001
+    set_action: 
+      lambda: id(pid_air_thermostat).set_ki( x );
+
+  # KD
+  - platform: template
+    name: kd
+    icon: mdi:chart-bell-curve
+    restore_value: true
+    min_value: 0
+    max_value: 10
+    step: 0.01
+    set_action: 
+      #lambda: this.integral_term = 0.68;
+      lambda: id(pid_air_thermostat).set_kd( x );
+    
+dallas:
+  - id: hub_1
+    pin: D0
+    update_interval: 2s
+  - id: hub_2
+    pin: D1
+    update_interval: 60s
+sensor:
+  - platform: dallas
+    id: coolant_temp
+    dallas_id: hub_1
+    name: "Coolant"
+    address: 0xD53C01F096014A28
+  - platform: dallas
+    dallas_id: hub_2
+    address: 0xB83C01F096280428
+    name: "Air temp"
+    id: air_temp
+ # - platform: dallas
+  #  dallas_id: hub_2
+   # address: 0x603C01F096BED528
+   # name: "Floor temp"
+   # id: floor_temp
+
+  - platform: pid
+    name: "PID Climate Result"
+    type: RESULT
+  - platform: pid
+    name: "PID Climate ERROR"
+    type: ERROR
+  - platform: pid
+    name: "PID Climate PROPORTIONAL"
+    type: PROPORTIONAL
+  - platform: pid
+    name: "PID Climate INTEGRAL"
+    type: INTEGRAL
+  - platform: pid
+    name: "PID Climate DERIVATIVE "
+    type: DERIVATIVE 
+  - platform: pid
+    name: "PID Climate HEAT"
+    type: HEAT
+  - platform: pid
+    name: "PID Climate KP"
+    type: KP
+  - platform: pid
+    name: "PID Climate KI"
+    type: KI
+  - platform: pid
+    name: "PID Climate KD"
+    type: KD
+     
+switch:
+  - platform: restart
+    name: "Restart"
+    
+  - platform: template
+    name: "PID Climate Autotune"
+    turn_on_action:
+      - climate.pid.autotune: pid_air_thermostat
+
+  - platform: gpio
+    name: "ten1"
+    pin: D5
+    inverted: no
+    id : ten1
+
+  - platform: gpio
+    name: "ten2"
+    pin: D6
+    inverted: no
+    id : ten2
+    
+   # on_turn_on:
+  #  - delay: 500ms
+  #  - switch.turn_on: h_relay10
+  #  on_turn_off:
+  #    if:
+  #      condition:
+  #        switch.is_off: h_relay1
+  #      then:
+  #        - delay: 10s
+  #        - switch.turn_off: h_relay10
+
+  - platform: gpio
+    name: "ten3"
+    pin: D7
+    inverted: no
+    id : ten3
+  
+
+output:
+  - platform: slow_pwm
+    id: my_slow_pwm
+    period: 60s
+    turn_on_action:
+      - lambda: |-
+          if (id(pid_air_thermostat).mode != 0){
+            auto call = id(thermostat_on_heater_3).make_call();
+            call.set_target_temperature(85);
+            call.perform();
+          }
+    turn_off_action:
+      - lambda: |-
+          if (id(pid_air_thermostat).mode != 0){
+            auto call = id(thermostat_on_heater_3).make_call();
+            call.set_target_temperature(0);
+            call.perform();
+          }
+
+  - platform: template
+    id: target_temperature_ten
+    type: float
+    write_action:
+      - lambda: |-
+          if (id(pid_air_thermostat).mode != 0){
+            id(my_slow_pwm).set_level(fmod(state, float(1)/float(3))*3);
+            //ESP_LOGW("custom", "0.0 - 0.33: %f \n", fmod(state, float(1) / float(3)));
+            //ESP_LOGW("custom", "0.0 - 1.0: %f \n", fmod(state, float(1) / float(3)) * 3);
+            if (state > 1.0/3){
+              auto call = id(thermostat_on_heater_2).make_call();
+              call.set_target_temperature(85);
+              call.perform();
+            } else {
+              auto call = id(thermostat_on_heater_2).make_call();
+              call.set_target_temperature(0);
+              call.perform();
+            }
+            if (state > 2.0/3){
+              auto call = id(thermostat_on_heater_1).make_call();
+              call.set_target_temperature(85);
+              call.perform();
+            } else {
+              auto call = id(thermostat_on_heater_1).make_call();
+              call.set_target_temperature(0);
+              call.perform();
+            }
+          }
+    #  - climate.control:
+     #     id: thermostat_on_heater_3
+      #    mode: "HEAT"
+       #   target_temperature: !lambda return state * 85;
+
+    #  - lambda: |-
+     #     auto call = id(thermostat_on_heater_1).make_call();
+      #    call.set_target_temperature(state*85);
+       #   call.perform();
+
+climate:
+  - platform: thermostat # Thermostat TEN #1
+    name: "Thermostat on heater #1"
+    id: thermostat_on_heater_1
+    sensor: coolant_temp
+    min_heating_off_time: 5s
+    min_heating_run_time: 5s
+    min_idle_time: 0s
+    heat_deadband: 1
+    heat_overrun: 0
+    heat_action:
+      - switch.turn_on: ten1
+    idle_action:
+      - switch.turn_off: ten1
+    visual:
+      min_temperature: 0 °C
+      max_temperature: 85 °C
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 85 °C
+    
+  - platform: thermostat # Thermostat TEN #2
+    name: "Thermostat on heater #2"
+    id: thermostat_on_heater_2
+    sensor: coolant_temp
+    min_heating_off_time: 5s
+    min_heating_run_time: 5s
+    min_idle_time: 0s
+    heat_deadband: 1
+    heat_overrun: 0
+    heat_action:
+      - switch.turn_on: ten2
+    idle_action:
+      - switch.turn_off: ten2
+    visual:
+      min_temperature: 0 °C
+      max_temperature: 85 °C
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 85 °C
+      
+  - platform: thermostat # Thermostat TEN #3
+    name: "Thermostat on heater #3"
+    id: thermostat_on_heater_3
+    sensor: coolant_temp
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s
+    heat_deadband: 1
+    heat_overrun: 0
+    heat_action:
+      - switch.turn_on: ten3
+    idle_action:
+      - switch.turn_off: ten3
+    visual:
+      min_temperature: 0 °C
+      max_temperature: 85 °C
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 85 °C
+      
+      
+  - platform: pid
+    name: "pid Air thermostat"
+    id: pid_air_thermostat
+    sensor: air_temp
+    default_target_temperature: 23°C
+    heat_output: target_temperature_ten
+    control_parameters:
+      kp: 0.5
+      ki: 0.0001 
+      kd: 0
+    visual:
+      min_temperature: 10 °C
+      max_temperature: 30 °C
+
+
+  - platform: thermostat
+    name: "Air thermostat"
+    id: air_thermostat
+    sensor: air_temp
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s
+    heat_deadband: 0.1
+    heat_overrun: 0.0
+    heat_action:
+      - climate.control:
+          id: thermostat_on_heater_1
+          mode: "HEAT"
+      - delay: 1s
+      - climate.control:
+          id: thermostat_on_heater_2
+          mode: "HEAT"
+    #  - if:
+    #      condition:
+    #        lambda: 'return id(some_sensor).state < 30;'
+    #      then:
+    #      - delay: 1s
+    #      - climate.control:
+    #          id: thermostat_on_heater_2
+    #          mode: "HEAT"
+      - delay: 1s
+      - climate.control:
+          id: thermostat_on_heater_3
+          mode: "HEAT"
+    idle_action:
+      - climate.control:
+          id: thermostat_on_heater_1
+          mode: "OFF"
+      - delay: 1s
+      - climate.control:
+          id: thermostat_on_heater_2
+          mode: "OFF"
+      - delay: 1s
+      - climate.control:
+          id: thermostat_on_heater_3
+          mode: "OFF"
+    visual:
+      min_temperature: 10 °C
+      max_temperature: 30 °C
+    preset:
+      - name: Home
+        default_target_temperature_low: 85 °C
